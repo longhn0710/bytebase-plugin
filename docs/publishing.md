@@ -140,9 +140,10 @@ Java 21/25 to meet the checked
 `N.v<commit>`, rather than the lab's 0.2.x PoC versions. Do not release with an
 ad hoc `mvn deploy` command.
 
-Network configuration remains a JVM/controller concern. The checker's recommendation
-about integrating Jenkins network settings is documented for review; removed
-per-plugin settings have not been reintroduced.
+The HTTP client uses `ProxyConfiguration.newHttpClientBuilder()` to honor the shared
+Jenkins controller network settings. Configure network routing in Jenkins rather
+than on individual Bytebase connections. The plugin has no separate proxy or custom
+header settings. Its request timeout and refusal to follow redirects remain enforced.
 
 ## Recorded verification stages
 
@@ -163,7 +164,14 @@ passed; processed SARIF contained 0 findings. The hosting infrastructure's
 [security scan](https://github.com/jenkins-infra/repository-permissions-updater/actions/runs/42363866951)
 also passed and assigned security-audit-done to the submitted request.
 
-Two recommendations remain recorded for Hosting Team review: the advanced credential
-override accepts a manually entered ID, and the HTTP client follows JVM settings
-rather than the Jenkins network-settings hook. Checks were not bypassed or disabled.
-The hosting issue remains the authority for later review, fork, and permission decisions.
+The initial submission also reported two recommendations. Follow-up changes replace
+the advanced credential ID textbox with the standard credentials selector, filtered
+by the selected connection URL and job permissions, and use the Jenkins HTTP client
+builder for shared controller network settings. Missing credential IDs remain visible
+on saved jobs to prevent accidental selection of a different account. The normal
+Pipeline flow continues to use only `serverName`.
+
+See the hosting issue and the repository's Actions runs for rechecks against the
+follow-up commit. Earlier checks above apply only to the commits named there. Checks
+were not bypassed or disabled. The hosting issue remains the authority for later
+review, fork, and permission decisions.

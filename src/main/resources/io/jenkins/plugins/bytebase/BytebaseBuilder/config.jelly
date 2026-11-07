@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:c="/lib/credentials">
   <f:entry title="Bytebase connection" field="serverName"><f:select/></f:entry>
   <f:entry title="Command" field="command"><f:select/></f:entry>
   <f:entry title="Project resource (projects/example)" field="project"><f:textbox/></f:entry>
@@ -13,7 +13,7 @@
   <f:entry title="Expected Oracle port (preflight only)" field="expectedPort"><f:textbox/></f:entry>
   <f:entry title="Expected Oracle service (preflight only)" field="expectedService"><f:textbox/></f:entry>
 
-  <f:entry title="Credential ID override (advanced, optional)" field="credentialsId" description="Leave empty to use the selected connection credential. An explicit override never falls back to the connection credential on failure."><f:textbox/></f:entry>
+  <f:entry title="Credential override (advanced, optional)" field="credentialsId" description="Leave empty to use the selected connection credential. An explicit override never falls back to the connection credential on failure."><c:select/></f:entry>
   <f:entry title="Declarative schema mode (experimental)" field="declarative"><f:checkbox/></f:entry>
   <f:entry title="AI custom rules" field="customRules"><f:textarea/></f:entry>
   <f:entry title="Existing plan resource (rollout only)" field="plan"><f:textbox/></f:entry>

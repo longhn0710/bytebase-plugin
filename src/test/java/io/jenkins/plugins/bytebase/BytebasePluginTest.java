@@ -3,15 +3,22 @@ package io.jenkins.plugins.bytebase;
 import static io.jenkins.plugins.bytebase.BytebaseClient.object;
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.cloudbees.plugins.credentials.CredentialsProvider;
 import com.cloudbees.plugins.credentials.CredentialsScope;
 import com.cloudbees.plugins.credentials.SystemCredentialsProvider;
+import com.cloudbees.plugins.credentials.domains.Domain;
+import com.cloudbees.plugins.credentials.domains.HostnameSpecification;
 import com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl;
 import com.sun.net.httpserver.HttpServer;
 import hudson.AbortException;
 import hudson.FilePath;
+import hudson.ProxyConfiguration;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
+import hudson.model.Item;
 import hudson.model.Result;
+import hudson.model.User;
+import hudson.security.ACL;
 import hudson.util.Secret;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -19,9 +26,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import jenkins.model.Jenkins;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.htmlunit.HttpMethod;
@@ -32,6 +41,7 @@ import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 @WithJenkins
@@ -538,6 +548,140 @@ class BytebasePluginTest {
             assertEquals(hudson.util.FormValidation.Kind.ERROR, failed.kind);
             assertTrue(failed.getMessage().contains("Service Key"));
             assertTrue(api.mutations().isEmpty());
+        }
+    }
+
+    @Test
+    void credentialOverrideDropdownHonorsJobPermissionsAndConnectionDomain(JenkinsRule j) throws Exception {
+        try (Api api = new Api()) {
+            configure(j, api);
+            SystemCredentialsProvider.getInstance()
+                    .getCredentials()
+                    .add(new StringCredentialsImpl(
+                            CredentialsScope.GLOBAL, "access-token", "", Secret.fromString("token-secret")));
+            CredentialsProvider.lookupStores(j.jenkins)
+                    .iterator()
+                    .next()
+                    .addDomain(
+                            new Domain("other", "", List.of(new HostnameSpecification("other.invalid", null))),
+                            List.of(new UsernamePasswordCredentialsImpl(
+                                    CredentialsScope.GLOBAL,
+                                    "other-account",
+                                    "",
+                                    "other@example.com",
+                                    "other-secret")));
+            FreeStyleProject job = j.createFreeStyleProject();
+            BytebaseBuilder step = options("check");
+            step.setCredentialsId("account");
+            job.getBuildersList().add(step);
+            job = j.configRoundtrip(job);
+            assertEquals(
+                    "account", job.getBuildersList().get(BytebaseBuilder.class).getCredentialsId());
+            var descriptor = j.jenkins.getDescriptorByType(BytebaseBuilder.DescriptorImpl.class);
+            assertEquals(
+                    Set.of("", "account", "access-token", "removed-account"),
+                    descriptor.doFillCredentialsIdItems(job, "test", "removed-account").stream()
+                            .map(option -> option.value)
+                            .collect(java.util.stream.Collectors.toSet()));
+            assertEquals(
+                    List.of("", "removed-account"),
+                    descriptor.doFillCredentialsIdItems(job, "unknown", "removed-account").stream()
+                            .map(option -> option.value)
+                            .toList());
+            var web = j.createWebClient().withThrowExceptionOnFailingStatusCode(false);
+            var endpoint = job.getUrl()
+                    + "descriptorByName/io.jenkins.plugins.bytebase.BytebaseBuilder/fillCredentialsIdItems?serverName=test";
+            assertTrue(List.of(404, 405)
+                    .contains(web.goTo(endpoint, null).getWebResponse().getStatusCode()));
+            var post = web.loadWebResponse(web.addCrumb(
+                    new WebRequest(j.getURL().toURI().resolve(endpoint).toURL(), HttpMethod.POST)));
+            assertEquals(200, post.getStatusCode());
+            assertTrue(post.getContentAsString().contains("access-token"));
+            assertFalse(post.getContentAsString().contains("other-account"));
+            assertFalse(post.getContentAsString().contains("account-secret"));
+            assertFalse(post.getContentAsString().contains("token-secret"));
+            j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+            j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
+                    .grant(Jenkins.READ, Item.READ)
+                    .everywhere()
+                    .to("reader", "editor")
+                    .grant(Item.CONFIGURE)
+                    .onItems(job)
+                    .to("editor"));
+            try (var ignored = ACL.as2(User.getById("reader", true).impersonate2())) {
+                assertTrue(descriptor.doFillCredentialsIdItems(job, "test", "").stream()
+                        .allMatch(option -> option.value.isEmpty()));
+                assertTrue(descriptor.doFillCredentialsIdItems(null, "test", "").stream()
+                        .allMatch(option -> option.value.isEmpty()));
+                assertEquals(
+                        List.of("saved-id"),
+                        descriptor.doFillCredentialsIdItems(job, "test", "saved-id").stream()
+                                .map(option -> option.value)
+                                .toList());
+            }
+            try (var ignored = ACL.as2(User.getById("editor", true).impersonate2())) {
+                assertTrue(descriptor.doFillCredentialsIdItems(job, "test", "").stream()
+                        .anyMatch(option -> option.value.equals("account")));
+                assertTrue(descriptor.doFillCredentialsIdItems(null, "test", "").stream()
+                        .allMatch(option -> option.value.isEmpty()));
+            }
+            assertTrue(api.requests.isEmpty(), "Rendering credentials must not call Bytebase");
+        }
+    }
+
+    @Test
+    void httpClientHonorsControllerNetworkSettingsWithoutFollowingRedirects(JenkinsRule j) throws Exception {
+        try (Api api = new Api()) {
+            configure(j, api);
+            List<String> proxiedPaths = new CopyOnWriteArrayList<>();
+            List<String> authorizations = new CopyOnWriteArrayList<>();
+            AtomicInteger status = new AtomicInteger(200);
+            HttpServer proxy = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            proxy.createContext("/", exchange -> {
+                proxiedPaths.add(exchange.getRequestURI().toString());
+                authorizations.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
+                exchange.getRequestBody().readAllBytes();
+                byte[] response = object("token", "proxy-token").toString().getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.getResponseHeaders().set("Location", api.url() + "/redirect-target");
+                exchange.sendResponseHeaders(status.get(), response.length);
+                exchange.getResponseBody().write(response);
+                exchange.close();
+            });
+            proxy.start();
+            ProxyConfiguration original = j.jenkins.proxy;
+            try {
+                j.jenkins.proxy =
+                        new ProxyConfiguration("127.0.0.1", proxy.getAddress().getPort());
+                BytebaseServer server = new BytebaseServer("proxied", "http://bytebase.invalid", "account");
+                BytebaseClient client = BytebaseClient.forServer(server, null, "", 5);
+                client.login();
+                client.call("ReleaseService", "CheckRelease", object());
+                assertEquals(
+                        List.of(
+                                "http://bytebase.invalid/bytebase.v1.AuthService/Login",
+                                "http://bytebase.invalid/bytebase.v1.ReleaseService/CheckRelease"),
+                        proxiedPaths);
+                assertEquals(List.of("null", "Bearer proxy-token"), authorizations);
+                assertTrue(api.requests.isEmpty());
+                j.jenkins.proxy.setNoProxyHost("127.0.0.1");
+                BytebaseClient direct = BytebaseClient.forServer(
+                        BytebaseGlobalConfiguration.get().findServer("test"), null, "", 5);
+                direct.login();
+                direct.call("ReleaseService", "CheckRelease", object());
+                assertEquals(2, proxiedPaths.size(), "Excluded hosts must bypass the controller proxy");
+                assertEquals(1, api.bodies("CheckRelease").size());
+                api.requests.clear();
+                status.set(307);
+                IOException redirect =
+                        assertThrows(IOException.class, () -> client.call("ReleaseService", "CheckRelease", object()));
+                assertTrue(redirect.getMessage().contains("HTTP 307"));
+                assertEquals(3, proxiedPaths.size());
+                assertTrue(api.requests.isEmpty(), "Redirects must not forward the access token to another host");
+            } finally {
+                j.jenkins.proxy = original;
+                proxy.stop(0);
+            }
         }
     }
 

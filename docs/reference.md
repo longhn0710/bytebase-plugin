@@ -35,7 +35,9 @@ These System connections do not provide team isolation inside Jenkins.
 An advanced `credentialsId` override remains available. A legacy Secret text
 credential may hold an existing access token; static tokens are not renewed.
 Service account login refreshes once after HTTP 401. TLS verification is enabled;
-private CAs must be trusted by the controller JVM.
+private CAs must be trusted by the controller JVM. HTTP connections honor the shared
+Jenkins controller network settings; there are no per-connection proxy or custom
+header fields.
 
 With Configuration as Code installed:
 

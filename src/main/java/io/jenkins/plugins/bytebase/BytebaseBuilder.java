@@ -1,12 +1,22 @@
 package io.jenkins.plugins.bytebase;
 
+import com.cloudbees.plugins.credentials.CredentialsMatchers;
+import com.cloudbees.plugins.credentials.CredentialsProvider;
+import com.cloudbees.plugins.credentials.common.StandardCredentials;
+import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
+import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
+import com.cloudbees.plugins.credentials.domains.URIRequirementBuilder;
 import hudson.AbortException;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
 import hudson.model.AbstractProject;
+import hudson.model.Item;
+import hudson.model.Queue;
 import hudson.model.Run;
 import hudson.model.TaskListener;
+import hudson.model.queue.Tasks;
+import hudson.security.ACL;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.Builder;
 import hudson.util.ListBoxModel;
@@ -18,8 +28,11 @@ import java.util.Set;
 import jenkins.model.Jenkins;
 import jenkins.tasks.SimpleBuildStep;
 import org.jenkinsci.Symbol;
+import org.jenkinsci.plugins.plaincredentials.StringCredentials;
+import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
+import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
 public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
@@ -392,6 +405,36 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
             items.add("FAIL_ON_WARNING");
             items.add("FAIL_ON_ERROR");
             return items;
+        }
+
+        @POST
+        public ListBoxModel doFillCredentialsIdItems(
+                @AncestorInPath Item item, @QueryParameter String serverName, @QueryParameter String credentialsId) {
+            StandardListBoxModel items = new StandardListBoxModel();
+            if (item == null
+                    ? !Jenkins.get().hasPermission(Jenkins.ADMINISTER)
+                    : !item.hasPermission(Item.CONFIGURE) || !item.hasPermission(CredentialsProvider.USE_ITEM)) {
+                return items.includeCurrentValue(credentialsId);
+            }
+            BytebaseServer server;
+            try {
+                server = BytebaseGlobalConfiguration.get().findServer(serverName);
+            } catch (IllegalArgumentException e) {
+                return items.includeEmptyValue().includeCurrentValue(credentialsId);
+            }
+            var authentication = item instanceof Queue.Task task ? Tasks.getAuthenticationOf2(task) : ACL.SYSTEM2;
+            var requirements = URIRequirementBuilder.fromUri(server.getUrl()).build();
+            var matcher = CredentialsMatchers.anyOf(
+                    CredentialsMatchers.instanceOf(StandardUsernamePasswordCredentials.class),
+                    CredentialsMatchers.instanceOf(StringCredentials.class));
+            items.includeEmptyValue();
+            if (item == null) {
+                items.includeMatchingAs(
+                        authentication, Jenkins.get(), StandardCredentials.class, requirements, matcher);
+            } else {
+                items.includeMatchingAs(authentication, item, StandardCredentials.class, requirements, matcher);
+            }
+            return items.includeCurrentValue(credentialsId);
         }
 
         @POST

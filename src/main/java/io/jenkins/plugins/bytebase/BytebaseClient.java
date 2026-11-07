@@ -5,6 +5,7 @@ import com.cloudbees.plugins.credentials.common.StandardCredentials;
 import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
 import com.cloudbees.plugins.credentials.domains.URIRequirementBuilder;
 import hudson.AbortException;
+import hudson.ProxyConfiguration;
 import hudson.model.Run;
 import hudson.security.ACL;
 import hudson.util.Secret;
@@ -42,7 +43,7 @@ final class BytebaseClient {
         this.token = token == null ? null : Secret.fromString(token);
         this.staticToken = token != null;
         this.timeout = Duration.ofSeconds(timeout);
-        this.http = HttpClient.newBuilder()
+        this.http = ProxyConfiguration.newHttpClientBuilder()
                 .connectTimeout(this.timeout)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
