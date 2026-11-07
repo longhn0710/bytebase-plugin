@@ -1,0 +1,50 @@
+pipeline {
+  agent any
+  environment {
+    BYTEBASE_SERVER = 'bytebase-default'
+    BYTEBASE_PROJECT = 'projects/example'
+    BYTEBASE_TARGET = 'instances/example/databases/example'
+  }
+  stages {
+    stage('Review') {
+      steps {
+        bytebase serverName: env.BYTEBASE_SERVER, command: 'check',
+          project: env.BYTEBASE_PROJECT, targets: env.BYTEBASE_TARGET,
+          filePattern: 'migrations/**/*.sql', checkRelease: 'FAIL_ON_ERROR',
+          output: 'reports/review.json'
+      }
+    }
+    stage('Prepare rollout') {
+      steps {
+        // The Bytebase project's auto-rollout policy must permit this approval flow.
+        bytebase serverName: env.BYTEBASE_SERVER, command: 'rollout',
+          project: env.BYTEBASE_PROJECT, targets: env.BYTEBASE_TARGET,
+          filePattern: 'migrations/**/*.sql', output: 'reports/prepared.json'
+      }
+    }
+    stage('Approve') {
+      steps {
+        timeout(time: 30, unit: 'MINUTES') {
+          input message: 'Run the prepared Bytebase plan?'
+        }
+      }
+    }
+    stage('Run approved plan') {
+      steps {
+        script {
+          // readJSON requires Pipeline Utility Steps.
+          def prepared = readJSON file: 'reports/prepared.json', returnPojo: true
+          bytebase serverName: env.BYTEBASE_SERVER, command: 'rollout',
+            project: env.BYTEBASE_PROJECT, plan: prepared.plan,
+            targetStage: 'environments/test', waitTimeoutSeconds: 1800,
+            output: 'reports/execution.json'
+        }
+      }
+    }
+  }
+  post {
+    always {
+      archiveArtifacts artifacts: 'reports/*.json', allowEmptyArchive: true
+    }
+  }
+}

@@ -1,0 +1,56 @@
+pipeline {
+  agent { label 'java17-codeql' }
+  parameters {
+    string(name: 'BYTEBASE_SERVER', defaultValue: 'bytebase-default', description: 'Connection configured with the same credential ID below')
+    string(name: 'BYTEBASE_CREDENTIAL_ID', defaultValue: 'bytebase-jenkins-sa', description: 'Diagnostic only: bind the same account for the old CLI')
+    string(name: 'BYTEBASE_URL', defaultValue: 'https://bytebase.example.com')
+    string(name: 'BYTEBASE_PROJECT', defaultValue: 'projects/example')
+    string(name: 'BYTEBASE_TARGET', defaultValue: 'instances/example/databases/example')
+  }
+  stages {
+    stage('Prepare identical SQL') {
+      steps {
+        sh 'command -v python3; command -v docker'
+        writeFile file: '.comparison/V3__add_source_system.sql', text: '''ALTER TABLE DEMO_ORDERS ADD (SOURCE_SYSTEM VARCHAR2(30));
+COMMENT ON COLUMN DEMO_ORDERS.SOURCE_SYSTEM IS 'Originating synthetic system';
+'''
+      }
+    }
+    stage('CLI 3.22.1 and read-only RPC probes') {
+      steps {
+        script {
+          withEnv(["BYTEBASE_URL=${params.BYTEBASE_URL}", "BYTEBASE_PROJECT=${params.BYTEBASE_PROJECT}",
+                   "BYTEBASE_TARGET=${params.BYTEBASE_TARGET}"]) {
+            withCredentials([usernamePassword(credentialsId: params.BYTEBASE_CREDENTIAL_ID,
+                usernameVariable: 'BYTEBASE_SERVICE_ACCOUNT', passwordVariable: 'BYTEBASE_SERVICE_ACCOUNT_SECRET')]) {
+              docker.image('bytebase/bytebase-action:3.22.1').inside('--entrypoint=""') {
+                sh 'sh examples/compare-cli.sh'
+              }
+            }
+          }
+        }
+      }
+    }
+    stage('Native plugin on the same SQL') {
+      steps {
+        script {
+          try {
+            bytebase serverName: params.BYTEBASE_SERVER, command: 'check', project: params.BYTEBASE_PROJECT,
+              targets: params.BYTEBASE_TARGET, filePattern: '.comparison/V3__add_source_system.sql',
+              checkRelease: 'SKIP', output: '.comparison/plugin.json'
+            writeFile file: '.comparison/plugin-status.txt', text: 'SUCCESS\n'
+          } catch (err) {
+            writeFile file: '.comparison/plugin-status.txt', text: 'FAILURE\n'
+            echo 'Native check failed; inspect the archived output and build result.'
+          }
+        }
+      }
+    }
+    stage('Compare') {
+      steps { sh 'python3 examples/compare-results.py' }
+    }
+  }
+  post {
+    always { archiveArtifacts artifacts: '.comparison/*', allowEmptyArchive: true }
+  }
+}

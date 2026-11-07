@@ -1,0 +1,30 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <f:entry title="Bytebase connection" field="serverName"><f:select/></f:entry>
+  <f:entry title="Command" field="command"><f:select/></f:entry>
+  <f:entry title="Project resource (projects/example)" field="project"><f:textbox/></f:entry>
+  <f:entry title="Targets (comma or newline separated)" field="targets"><f:textarea/></f:entry>
+  <f:entry title="SQL file pattern (workspace relative Ant glob)" field="filePattern"><f:textbox/></f:entry>
+  <f:entry title="SQL quality gate" field="checkRelease"><f:select/></f:entry>
+<f:advanced>
+  <f:entry title="Expected Bytebase URL (optional connection guard)" field="expectedUrl"><f:textbox/></f:entry>
+  <f:entry title="Inspection mode (inspect only: preflight, ready, done)" field="inspectionMode"><f:textbox/></f:entry>
+  <f:entry title="Expected Oracle host (preflight only)" field="expectedHost"><f:textbox/></f:entry>
+  <f:entry title="Expected Oracle port (preflight only)" field="expectedPort"><f:textbox/></f:entry>
+  <f:entry title="Expected Oracle service (preflight only)" field="expectedService"><f:textbox/></f:entry>
+
+  <f:entry title="Credential ID override (advanced, optional)" field="credentialsId" description="Leave empty to use the selected connection credential. An explicit override never falls back to the connection credential on failure."><f:textbox/></f:entry>
+  <f:entry title="Declarative schema mode (experimental)" field="declarative"><f:checkbox/></f:entry>
+  <f:entry title="AI custom rules" field="customRules"><f:textarea/></f:entry>
+  <f:entry title="Existing plan resource (rollout only)" field="plan"><f:textbox/></f:entry>
+  <f:entry title="Target environment (optional; environments/test)" field="targetStage"><f:textbox/></f:entry>
+  <f:entry title="Release ID template" field="releaseIdTemplate"><f:textbox/></f:entry>
+  <f:entry title="Release timezone" field="releaseIdTimezone"><f:textbox/></f:entry>
+  <f:entry title="Output JSON path (empty disables workspace output)" field="output"><f:textbox/></f:entry>
+  <f:entry title="HTTP timeout (seconds, 1..600)" field="httpTimeoutSeconds"><f:number/></f:entry>
+  <f:entry title="Rollout wait timeout (seconds)" field="waitTimeoutSeconds"><f:number/></f:entry>
+  <f:entry title="Poll interval (seconds, 1..300)" field="pollIntervalSeconds"><f:number/></f:entry>
+  <f:entry title="VCS type (GITHUB, GITLAB, BITBUCKET, AZURE_DEVOPS)" field="vcsType"><f:textbox/></f:entry>
+  <f:entry title="VCS commit URL" field="vcsUrl"><f:textbox/></f:entry>
+</f:advanced>
+</j:jelly>

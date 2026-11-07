@@ -1,0 +1,52 @@
+pipeline {
+  agent any
+  parameters {
+    string(name: 'BYTEBASE_SERVER', defaultValue: 'bytebase-default', description: 'Server name configured in Manage Jenkins / System')
+    string(name: 'BYTEBASE_PROJECT', defaultValue: 'projects/example', description: 'Existing project for SQL review')
+    string(name: 'BYTEBASE_TARGET', defaultValue: 'instances/example/databases/example', description: 'Existing database resource')
+    choice(name: 'SQL_ENGINE', choices: ['POSTGRESQL', 'ORACLE'], description: 'Dialect of the review fixture')
+    choice(name: 'CHECK_RELEASE', choices: ['FAIL_ON_ERROR', 'FAIL_ON_WARNING', 'SKIP'], description: 'SQL quality gate; SKIP still records all advices')
+  }
+  stages {
+    stage('Prepare review fixture') {
+      steps {
+        script {
+          def oracle = '''
+CREATE TABLE JENKINS_PLUGIN_POC (
+  ID NUMBER(19) DEFAULT 0 NOT NULL,
+  SOURCE_SYSTEM VARCHAR2(64) DEFAULT 'JENKINS' NOT NULL,
+  CONSTRAINT PK_JENKINS_PLUGIN_POC PRIMARY KEY (ID)
+);
+COMMENT ON TABLE JENKINS_PLUGIN_POC IS 'Jenkins native plugin review fixture';
+COMMENT ON COLUMN JENKINS_PLUGIN_POC.ID IS 'Review fixture identifier';
+COMMENT ON COLUMN JENKINS_PLUGIN_POC.SOURCE_SYSTEM IS 'Review fixture source';
+'''
+          def postgres = '''
+CREATE TABLE public.jenkins_plugin_poc (
+  id BIGINT DEFAULT 0 NOT NULL,
+  source_system VARCHAR(64) DEFAULT 'JENKINS' NOT NULL,
+  CONSTRAINT pk_jenkins_plugin_poc PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.jenkins_plugin_poc IS 'Jenkins native plugin review fixture';
+COMMENT ON COLUMN public.jenkins_plugin_poc.id IS 'Review fixture identifier';
+COMMENT ON COLUMN public.jenkins_plugin_poc.source_system IS 'Review fixture source';
+'''
+          writeFile file: 'bytebase-poc/V1__poc.sql', text: params.SQL_ENGINE == 'ORACLE' ? oracle : postgres
+        }
+      }
+    }
+    stage('Native Bytebase SQL check') {
+      steps {
+        bytebase serverName: params.BYTEBASE_SERVER,
+          command: 'check', project: params.BYTEBASE_PROJECT, targets: params.BYTEBASE_TARGET,
+          filePattern: 'bytebase-poc/*.sql', checkRelease: params.CHECK_RELEASE,
+          output: 'bytebase-poc/result.json'
+      }
+    }
+  }
+  post {
+    always {
+      archiveArtifacts artifacts: 'bytebase-poc/*.sql,bytebase-poc/result.json', allowEmptyArchive: true
+    }
+  }
+}
