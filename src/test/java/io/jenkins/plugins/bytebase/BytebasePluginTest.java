@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
@@ -512,6 +514,20 @@ class BytebasePluginTest {
     void connectionTestExplainsMissingAndInvalidServiceKeys(JenkinsRule j) throws Exception {
         try (Api api = new Api()) {
             configure(j, api);
+            var web = j.createWebClient().withThrowExceptionOnFailingStatusCode(false);
+            for (String path : List.of(
+                    "descriptorByName/io.jenkins.plugins.bytebase.BytebaseServer/fillCredentialsIdItems?url="
+                            + java.net.URLEncoder.encode(api.url(), StandardCharsets.UTF_8),
+                    "descriptorByName/io.jenkins.plugins.bytebase.BytebaseBuilder/fillServerNameItems")) {
+                var endpoint = j.getURL().toURI().resolve(path).toURL();
+                var get = web.getPage(endpoint.toString()).getWebResponse();
+                assertTrue(List.of(404, 405).contains(get.getStatusCode()), "Dropdown must reject GET");
+                var post = web.loadWebResponse(web.addCrumb(new WebRequest(endpoint, HttpMethod.POST)));
+                assertEquals(200, post.getStatusCode());
+                assertTrue(post.getContentAsString().contains(path.contains("CredentialsId") ? "account" : "test"));
+                assertFalse(post.getContentAsString().contains("account-secret"));
+            }
+            assertTrue(api.requests.isEmpty(), "Listing credentials and connections must not call Bytebase");
             var descriptor = new BytebaseServer.DescriptorImpl();
             assertEquals(
                     hudson.util.FormValidation.Kind.ERROR, descriptor.doTestConnection("test", api.url(), "").kind);

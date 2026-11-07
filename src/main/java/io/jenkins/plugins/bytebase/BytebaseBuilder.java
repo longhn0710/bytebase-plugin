@@ -20,6 +20,7 @@ import jenkins.tasks.SimpleBuildStep;
 import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
+import org.kohsuke.stapler.verb.POST;
 
 public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
     private final String serverName;
@@ -393,6 +394,7 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
             return items;
         }
 
+        @POST
         public ListBoxModel doFillServerNameItems() {
             ListBoxModel items = new ListBoxModel();
             if (!Jenkins.get().hasPermission(Jenkins.READ)) {

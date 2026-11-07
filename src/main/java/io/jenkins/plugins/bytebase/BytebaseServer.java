@@ -64,6 +64,7 @@ public final class BytebaseServer extends AbstractDescribableImpl<BytebaseServer
             return "Bytebase connection";
         }
 
+        @POST
         public ListBoxModel doFillCredentialsIdItems(@QueryParameter String url) {
             if (!Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
                 return new ListBoxModel();

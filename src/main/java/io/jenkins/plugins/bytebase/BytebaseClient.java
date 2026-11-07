@@ -7,6 +7,7 @@ import com.cloudbees.plugins.credentials.domains.URIRequirementBuilder;
 import hudson.AbortException;
 import hudson.model.Run;
 import hudson.security.ACL;
+import hudson.util.Secret;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -28,17 +29,17 @@ import org.jenkinsci.plugins.plaincredentials.StringCredentials;
 final class BytebaseClient {
     private final String url;
     private final String username;
-    private final String password;
+    private final Secret password;
     private final boolean staticToken;
     private final Duration timeout;
     private final HttpClient http;
-    private String token;
+    private Secret token;
 
     BytebaseClient(String url, String username, String password, String token, int timeout) {
         this.url = url;
         this.username = username;
-        this.password = password;
-        this.token = token;
+        this.password = Secret.fromString(password);
+        this.token = token == null ? null : Secret.fromString(token);
         this.staticToken = token != null;
         this.timeout = Duration.ofSeconds(timeout);
         this.http = HttpClient.newBuilder()
@@ -97,11 +98,11 @@ final class BytebaseClient {
 
     void login() throws IOException, InterruptedException {
         if (!staticToken) {
-            JSONObject response =
-                    request("AuthService", "Login", object("email", username, "password", password), false);
-            token = response.optString("token");
+            JSONObject response = request(
+                    "AuthService", "Login", object("email", username, "password", password.getPlainText()), false);
+            token = Secret.fromString(response.optString("token"));
         }
-        if (token == null || token.isBlank()) {
+        if (token == null || token.getPlainText().isBlank()) {
             throw new AbortException("Bytebase authentication returned no access token");
         }
     }
@@ -134,7 +135,7 @@ final class BytebaseClient {
                 .header("Connect-Protocol-Version", "1")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8));
         if (authenticated && token != null) {
-            builder.header("Authorization", "Bearer " + token);
+            builder.header("Authorization", "Bearer " + token.getPlainText());
         }
         HttpResponse<byte[]> response;
         try {
