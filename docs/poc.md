@@ -1,113 +1,107 @@
-# Kiểm chứng plugin và PoC trong cụm
+# Plugin verification and lab PoC
 
-Ngày kiểm chứng: **2026-11-07**, múi giờ UTC+07.
+Verification date: **2026-11-07**, UTC+07.
+This document preserves the early PoC results. The subsequent native V4 rollout,
+plan 104/task 104 DONE, Oracle verification, and 0.2.1 upgrade fix are recorded in
+[live-delivery.md](live-delivery.md). CLI/account parity is in
+[cli-parity.md](cli-parity.md). Current public CI is separate from these lab artifacts.
 
-Đối chiếu mới nhất với CLI và role GitOps: [cli-parity.md](cli-parity.md).
-Plugin 0.2.0 đã active sau safeRestart được người dùng cho phép. Lượt đối chiếu CLI
-build #4 dùng 0.2.0; các lượt SQL check ban đầu bên dưới dùng 0.1.0.
+## Automated verification
 
-Bàn giao mới nhất: [live-delivery.md](live-delivery.md). Native rollout V4 đã SUCCESS,
-plan104/task104 DONE và đã đối chiếu Oracle. Các phần PoC 0.1.0 bên dưới là lịch sử
-review-only; không mô tả trạng thái hoàn thành mới nhất.
+`mvn -B -ntp spotless:apply verify` completed with BUILD SUCCESS. The initial
+setup used Maven 3.9.11 and Corretto JDK 21, targeting Java 17 and Jenkins 2.504.3.
+Build tools were downloaded into a local cache without a system-wide installation.
+The hosting preparation later raised the baseline; see pom.xml and the CI matrix.
 
-## Kết quả tự động đã chạy
+- The final lab 0.2.1 source passed 15 integration tests on Java 17 and Java 21.
+- Of 8 generated harness tests, 7 passed and 1 was skipped because no localization
+  properties existed. These counts include the upgrade regression coverage added
+  after the first PoC runs.
+- SpotBugs: 0 bugs; Spotless clean; dependency/API checks passed.
+- Generated artifact: `target/bytebase.hpi` at the repository root.
+- Generated reports: `target/surefire-reports/` at the repository root.
 
-`mvn -B -ntp spotless:apply verify` hoàn tất **BUILD SUCCESS**.
-Môi trường: Maven 3.9.11, Corretto JDK 21; biên dịch target Java 17, Jenkins 2.504.3.
-Các công cụ build được tải vào cache cục bộ, không cài Java/Maven toàn hệ thống.
+The harness starts Jenkins and a remote agent for Pipeline testing. A controlled
+HTTP server implements Bytebase Connect RPC responses from the reference schema.
+It covers complete workflows, including rollout and cancellation. Live SQL review
+was additionally verified against Jenkins and Bytebase in the lab.
 
-- 15 integration test của plugin0.2.1: pass toàn bộ trên Java17 và Java21.
-- 8 test do Jenkins plugin harness sinh: 7 pass, 1 skip vì không có properties localization.
-- SpotBugs: 0 bugs; Spotless: sạch; dependency/API checks: pass.
-- Artifact: `../target/bytebase.hpi` tính từ thư mục docs của repo.
-- Báo cáo test: `../target/surefire-reports/` tính từ thư mục docs.
-
-Harness khởi động Jenkins thật và một remote agent cho test Pipeline. Bytebase được
-mô phỏng bằng HTTP server theo schema Connect RPC của source tham chiếu. Phần này
-kiểm chứng toàn bộ luồng, gồm rollout/cancellation. SQL check đã được kiểm chứng thêm
-trên Jenkins và Bytebase thật trong phần PoC live bên dưới.
-
-| Tình huống | Kết quả đã xác nhận |
+| Scenario | Verified behavior |
 | --- | --- |
-| Pipeline đọc SQL trên remote agent | Version và SQL base64 chính xác, JSON được archive |
-| Freestyle + UI config save/reload | Các giá trị build step/server/credential ID được giữ |
-| SQL ERROR/WARNING với ba quality gate | Đúng trạng thái build; output/report còn sau fail |
-| CreateRelease → CreatePlan → CreateRollout | Đúng resource names, UUID spec, release reference, VCS source |
-| Chạy đến environments/test | Chạy stage test và dừng trước prod |
-| Có plan, files/targets không hợp lệ | Bỏ qua files/targets như action |
-| Không có targetStage | Không gọi GetRollout/BatchRunTasks |
-| Environment đích không tồn tại | Fail, không gọi BatchRunTasks |
-| Task FAILED | Build fail |
-| Timeout và task-run pagination | Hủy RUNNING/PENDING trên đủ trang, nhóm theo stage |
-| Abort lúc chờ/đọc HTTP response | Build ABORTED, yêu cầu hủy task run |
-| Declarative | Check từng file, rollout ghép có newline |
-| Auth token/service account | Đúng bearer, refresh service account khi 401 |
-| Mutation trả 503 | Không tự phát lại mutation |
-| Credential không tồn tại | Fail trước khi gọi API |
-| Path traversal/symlink ngoài workspace | Bị từ chối |
-| Nhiều operation trong một build | Giữ đầy đủ report trong một build action |
+| Pipeline reads SQL on a remote agent | Correct version/base64 SQL and archived JSON |
+| Freestyle and UI config round-trip | Build step, connection, and credential IDs retained |
+| ERROR/WARNING under three quality gates | Correct build result; output/report survives failure |
+| CreateRelease → CreatePlan → CreateRollout | Correct resource names, UUID spec, release, and VCS references |
+| Run through environments/test | Executes test and stops before prod |
+| Existing plan with invalid files/targets | Ignores files/targets as the action does |
+| No targetStage | Does not call GetRollout/BatchRunTasks |
+| Missing target environment | Fails without BatchRunTasks |
+| FAILED task | Build fails |
+| Timeout and paginated task runs | Cancels RUNNING/PENDING runs on all pages, grouped by stage |
+| Abort while waiting or reading HTTP | Build ABORTED and cancellation requested |
+| Declarative mode | Checks files separately; joins rollout SQL with newlines |
+| Access token/service account | Correct bearer authentication and refresh after 401 |
+| Mutation returns 503 | No automatic replay |
+| Missing credential | Fails before calling Bytebase |
+| Traversal/symlink outside workspace | Rejected |
+| Several operations in a build | All reports retained in one action |
 
-## PoC live đã chạy trong cụm
+## Initial live review-only PoC
 
-- Jenkins **2.568.3**, Java 21; Bytebase **3.22.1**.
-- HPI **0.1.0-SNAPSHOT** đã upload bằng Jenkins Plugin Manager, nạp động thành công;
-  plugin active, không có failed plugin, không restart controller.
-- Các dependency hiện có tương thích; không nâng cấp dependency trên cụm.
-- Thêm server `bytebase-lab`, để credential mặc định trống và truyền credential ID
-  hiện có qua build step. Không tạo, sao chép hoặc thay đổi credential Bytebase.
-- Tạo folder riêng `bytebase-plugin-poc`, chứa Pipeline `native-sql-check` và Freestyle
-  `native-sql-check-freestyle`. SQL được đọc trên remote agent, API gọi từ controller.
-- Các job hiện có được giữ nguyên. Không thay đổi policy hay quyền trong Bytebase.
+- Jenkins 2.568.3 with Java 21; Bytebase 3.22.1.
+- HPI 0.1.0-SNAPSHOT was uploaded through Plugin Manager and loaded dynamically:
+  active, no failed plugins, no controller restart at this stage.
+- Existing dependencies were compatible and were not upgraded in the cluster.
+- Connection bytebase-lab initially had no default credential; the build step supplied
+  an existing credential ID. No Bytebase credential was created, copied, or changed.
+- Isolated folder bytebase-plugin-poc contained native-sql-check Pipeline and
+  native-sql-check-freestyle. SQL was read on an agent; API calls ran on the controller.
+- Existing jobs, Bytebase policies, and account permissions were unchanged at this stage.
 
-| Job / build | Quality gate | ERROR / WARNING | Kết quả |
+| Job / build | Gate | ERROR / WARNING | Result |
 | --- | --- | --- | --- |
-| Pipeline #2 | SKIP | 3 / 4 | SUCCESS; trả đầy đủ advices |
-| Pipeline #3 | FAIL_ON_ERROR | 3 / 4 | FAILURE đúng kỳ vọng |
-| Pipeline #4 | FAIL_ON_WARNING | 0 / 11 | FAILURE đúng kỳ vọng |
+| Pipeline #2 | SKIP | 3 / 4 | SUCCESS with all advices retained |
+| Pipeline #3 | FAIL_ON_ERROR | 3 / 4 | Expected FAILURE |
+| Pipeline #4 | FAIL_ON_WARNING | 0 / 11 | Expected FAILURE |
 | Pipeline #5 | FAIL_ON_ERROR | 0 / 1 | SUCCESS |
 | Freestyle #1 | FAIL_ON_ERROR | 0 / 1 | SUCCESS |
 
-Fixture Oracle ban đầu thiếu comments/defaults; fixture sau bổ sung các phần đó.
-Build #4 dùng quoted lowercase identifiers và bị policy Oracle cảnh báo. Fixture
-cuối dùng uppercase identifiers, còn một warning về quy tắc tên bảng; FAIL_ON_ERROR
-cho phép warning này theo đúng cấu hình. Không đổi policy để làm build pass.
-Build #1 lỗi quoting trong script setup PoC, đã sửa trước khi plugin được gọi.
+The initial Oracle fixture lacked comments/defaults, which were added to later
+review inputs. Build #4 used quoted lowercase identifiers and triggered policy
+warnings. The final uppercase fixture retained a table-naming warning, allowed by
+FAIL_ON_ERROR. Policies were not changed. Build #1 failed due to setup-script quoting
+before invoking the plugin; the setup was corrected.
 
-Cả năm build kiểm chứng đều archive SQL và JSON. Trang **Bytebase results** trả HTTP
-200 và giữ checkResults cả khi quality gate làm build fail. Console xác nhận dùng
-step `bytebase`, không gọi `bytebase-action` hoặc Docker để chạy Bytebase.
-Freestyle dùng shell chỉ để tạo SQL fixture trước build step native.
+All five verification builds archived SQL and JSON. Bytebase results returned HTTP 200
+and retained checkResults after gate failure. Console output confirmed use of the
+native bytebase step without bytebase-action or Docker execution. Freestyle used a
+shell only to create the review fixture.
 
-Bằng chứng cục bộ, nằm trong `target/` đã được gitignore:
+Generated evidence was saved under target/poc/ and copied into the private delivery
+bundle. A clean build may remove target/. The original files included summary.json,
+result JSON, console logs, and example-validation.txt.
 
-- `target/poc/summary.json`: job URLs, build status, parameters, advice counts, artifacts.
-- `target/poc/*-result.json`: response Bytebase thật.
-- `target/poc/*-console.txt`: console từng build.
-- `target/poc/example-validation.txt`: Jenkins declarative linter chấp nhận Jenkinsfile mẫu.
+This initial phase reviewed SQL only: no release/plan/rollout creation, DDL/DML, or
+restart. Rollout/abort/timeout were initially verified in the harness. The later lab
+rollout used a confirmed synthetic target, as documented in live-delivery.md.
 
-PoC live **chỉ review SQL**: không tạo release/plan/rollout, không thực thi DDL/DML
-trên database và không restart Jenkins. Rollout/abort/timeout đã pass trong integration
-harness; chưa chạy rollout live vì target hiện có là database ứng dụng. Cần chọn
-project/database lab và credential có quyền deploy trước khi kiểm chứng phần đó.
+## Reproduce the review PoC
 
-## Chạy PoC trực tiếp
+1. Build/install the development HPI using the [reference](reference.md#repository-ci-and-local-builds).
+2. Add bytebase-lab under Manage Jenkins → System → Bytebase.
+3. Choose a service account credential with SQL-check access on the lab target and
+   confirm Test connection. Folder credentials require a job in that folder and an
+   explicit credentialsId; the global connection test cannot use that folder scope.
+4. Create a Pipeline from [examples/Jenkinsfile.poc](../examples/Jenkinsfile.poc).
+5. Set the actual project/target, SQL_ENGINE, and CHECK_RELEASE, then run the build.
+6. Inspect the console, Bytebase results, and bytebase-poc/result.json artifact.
 
-1. Cài `target/bytebase.hpi` qua Jenkins Plugin Manager, theo hướng dẫn trong README.
-2. Thêm server `bytebase-lab` trong Manage Jenkins → System → Bytebase.
-3. Chọn Jenkins credential của service account Bytebase có quyền SQL check trên lab
-   project/target. Test connection phải thành công. Nếu credential nằm trong folder,
-   đặt job PoC trong folder đó, để credential mặc định của server trống và truyền
-   `credentialsId` vào step; nút Test connection toàn cục không dùng được folder credential.
-4. Tạo Pipeline lab dùng [examples/Jenkinsfile.poc](../examples/Jenkinsfile.poc).
-5. Điền project/database resource thật, chọn `SQL_ENGINE` và `CHECK_RELEASE`, rồi Build.
-6. Kiểm tra console, trang **Bytebase results**, artifact `bytebase-poc/result.json`.
+CheckRelease reviews the CREATE TABLE fixture without executing it. The PoC defaults
+to FAIL_ON_ERROR; use FAIL_ON_WARNING for a stricter gate or SKIP to inspect reports
+without enforcing advice severity. PostgreSQL and Oracle fixtures are supported;
+the server's actual policy may produce additional advices.
 
-PoC này chỉ gọi CheckRelease; câu CREATE TABLE là input để server review, không được
-plugin thực thi. Mặc định quality gate là `FAIL_ON_ERROR`; có thể chọn
-`FAIL_ON_WARNING` theo policy CI hoặc `SKIP` để quan sát report dù SQL có lỗi.
-Fixture hỗ trợ PostgreSQL và Oracle; policy thực tế vẫn có thể trả advices.
-
-Để PoC rollout vào database lab, dùng [examples/Jenkinsfile](../examples/Jenkinsfile),
-chọn đúng environment và SQL migration lab. Cấu hình Bytebase auto-rollout/policy cần
-phù hợp với Jenkins approval flow; không thay policy chỉ để làm build xanh. Hủy hoặc
-xóa job PoC qua Jenkins UI khi không cần giữ kết quả nữa.
+For a lab rollout, use [examples/Jenkinsfile](../examples/Jenkinsfile) with an approved
+environment and migration. Confirm auto-rollout/approval policy first. Do not change
+policy just to make the build pass. Remove or disable one-off jobs through Jenkins
+when their retained results are no longer needed.

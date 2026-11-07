@@ -4,7 +4,7 @@ Run Bytebase SQL review and staged database rollouts from Jenkins Pipeline or
 Freestyle jobs. The plugin calls Bytebase directly; agents do not need the
 Bytebase CLI, Go, or a container runtime.
 
-[Tiếng Việt](README.vi.md) · [Pipeline example](examples/Jenkinsfile) ·
+[Configuration reference](docs/reference.md) · [Pipeline example](examples/Jenkinsfile) ·
 [CLI feature mapping](docs/action-migration.md) · [Publishing](docs/publishing.md)
 
 The plugin is being prepared for Jenkins hosting and is not yet available from
@@ -126,7 +126,7 @@ subject to the Bytebase engine's restrictions.
 
 The Oracle preflight is optional and specific to that inspection workflow;
 review and rollout support the engines exposed by Bytebase. See the
-[Vietnamese reference](README.vi.md#tùy-chọn) for all step parameters and defaults.
+[configuration reference](docs/reference.md#step-options) for all step parameters and defaults.
 
 ## Operation and limits
 

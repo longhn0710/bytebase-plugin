@@ -1,80 +1,86 @@
-# Phân tích và mapping bytebase/action → Jenkins
+# Mapping bytebase/action to Jenkins
 
-Nguồn đối chiếu: `../../bytebase/action/{command,world,github,gitlab,azure,bitbucket}`,
-`../../ansible-tower-plugin/src/main/java/org/jenkinsci/plugins/ansible_tower`.
-Đối chiếu thêm source action tag `3.22.1` vì đó là Bytebase đang chạy trong cụm.
-Không sửa các repository tham chiếu.
+The implementation was compared with Bytebase's `action/{command,world,github,gitlab,azure,bitbucket}`
+source and the Ansible Tower Jenkins plugin's configuration patterns. The Bytebase
+action at tag `3.22.1` was also reviewed because that version runs in the lab.
+The reference repositories were not modified.
 
-## Luồng thực tế trong source
+## Source behavior
 
-`root.go` đăng ký check/rollout, validate flags/auth/targets và client timeout.
-`api.go` dùng Connect RPC, bearer token, login refresh, retry transient và task-run
-pagination. Plugin dùng cùng protocol với JSON protobuf, SQL bytes encode base64.
+`root.go` registers check/rollout commands and validates flags, authentication,
+targets, and HTTP timeout. `api.go` implements Connect RPC, bearer authentication,
+login refresh, transient retries, and task-run pagination. The plugin uses the
+same protocol with protobuf JSON and base64-encoded SQL bytes.
 
-`check.go`: đọc file → CheckRelease (không tạo release) → tạo output theo CI platform
-→ áp dụng quality gate. Mỗi advice ERROR/WARNING ảnh hưởng gate; affected rows/risk
-được giữ trong response JSON. Plugin lưu report/output trước khi lỗi gate đi qua
-ranh giới build step, và ghi tổng số lỗi/cảnh báo vào console.
+`check.go` reads files, calls CheckRelease without creating a release, formats the
+CI platform's output, and applies the quality gate. ERROR/WARNING advices affect
+the gate; affected-row and risk information remain in the response. The plugin
+persists its report/output before propagating a gate failure and logs advice counts.
 
-`rollout.go`: có plan thì GetPlan; không có thì CreateRelease → CreatePlan với một
-changeDatabaseConfig spec (UUID, release, targets). Sau đó CreateRollout với parent
-plan, không gửi target để tạo đủ stage. Nếu có targetStage, refresh rollout, chạy các
-task NOT_STARTED từng stage và chờ DONE/SKIPPED; dừng khi đến environment đích.
-Source không gọi IssueService trực tiếp dù README action nói tới rollout issue.
+`rollout.go` calls GetPlan when a plan is supplied. Otherwise, it calls CreateRelease
+and CreatePlan with one changeDatabaseConfig spec containing a UUID, release, and
+targets. CreateRollout uses the plan as parent without restricting the created
+stages. With targetStage set, the action refreshes the rollout, starts NOT_STARTED
+tasks stage by stage, waits for DONE/SKIPPED, and stops at the selected environment.
+The source does not call IssueService directly, despite the action README's mention
+of a rollout issue.
 
-Khi context bị cancel, action liệt kê đủ task run, chọn RUNNING/PENDING, nhóm theo
-stage rồi BatchCancelTaskRuns. Plugin ánh xạ sang interrupt/timeout của Jenkins.
+On cancellation, the action lists all task-run pages, selects RUNNING/PENDING runs,
+groups them by stage, and calls BatchCancelTaskRuns. Jenkins interruption and
+rollout timeout drive the plugin's corresponding behavior.
 
-`file.go`: recursive glob, sort đường dẫn, lấy version từ đầu filename và bỏ qua file
-không có version. Declarative check gửi file riêng; rollout ghép bằng newline.
-Source hiện tại **không đọc comment migration-type gh-ost**; protobuf Release.File
-cũng không có trường migration type. Vì vậy plugin không tuyên bố hỗ trợ feature đó.
+`file.go` expands recursive globs, sorts paths, extracts versions from filenames,
+and ignores files without a version. Declarative check sends files separately;
+declarative rollout joins them with newlines. The reviewed source does not read
+gh-ost migration-type comments, and protobuf Release.File has no migration-type
+field. The plugin therefore does not claim that feature.
 
-## Mapping
+## Feature mapping
 
-| Action | Plugin Jenkins | Trạng thái |
+| Action | Jenkins plugin | Status |
 | --- | --- | --- |
-| check, --check-release | command=check, checkRelease | Đã chuyển |
-| rollout từ SQL | command=rollout, filePattern, targets | Đã chuyển |
-| rollout từ plan | plan | Đã chuyển; bỏ qua files/targets |
-| --target-stage | targetStage | Đã chuyển; fail nếu environment không tồn tại |
-| service-account / secret | Username with password credential | Đã chuyển; không dùng env secret |
-| access-token | Secret text credential | Đã chuyển; nhận token đã exchange |
-| --timeout | httpTimeoutSeconds | Đã chuyển |
-| --project, --targets | project, targets | Đã chuyển; không mặc định vào sample/prod |
-| --file-pattern | filePattern, workspace FilePath | Ant glob; không phải mọi cú pháp doublestar |
-| --declarative | declarative | Đã chuyển; engine/SQL restrictions do server |
-| --custom-rules | customRules | Đã chuyển |
-| release ID template/timezone | releaseIdTemplate/releaseIdTimezone | Đã chuyển |
-| output JSON | output + Bytebase results build action | Đã chuyển; giữ resource tạo một phần |
-| VCS release source | vcsType + vcsUrl | Truyền rõ commit URL từ Jenkins checkout |
-| VCS PR creator lookup | Không tự lookup | Chưa chuyển; cần integration riêng theo SCM |
-| GitHub comment/annotations/step summary | Build action + JSON | Không tự đăng comment |
-| GitLab Code Quality JSON | checkResults JSON | Không tạo Code Quality format riêng |
-| Azure logging / Bitbucket reports | Build log + JSON | Không gọi API nền tảng khác |
-| CLI/server version window | Plugin API baseline 3.22.1 | Không áp dụng version của CLI vào version plugin |
-| Cancel on context termination | Cancel task runs khi abort/timeout | Đã chuyển; best effort, đủ pagination |
-| Transient retries | Retry đọc/check; mutation chỉ refresh auth | Tránh tự phát lại mutation bị mất response |
+| check, --check-release | command=check, checkRelease | Implemented |
+| Rollout from SQL | command=rollout, filePattern, targets | Implemented |
+| Rollout from a plan | plan | Implemented; ignores files/targets |
+| --target-stage | targetStage | Implemented; fails for a missing environment |
+| Service account / secret | Username with password credential | Implemented; no secret environment variables |
+| Access token | Secret text credential | Implemented; accepts an existing access token |
+| --timeout | httpTimeoutSeconds | Implemented |
+| --project, --targets | project, targets | Implemented; no sample/production defaults |
+| --file-pattern | filePattern, workspace FilePath | Ant glob; not every doublestar expression |
+| --declarative | declarative | Implemented; server enforces engine/SQL restrictions |
+| --custom-rules | customRules | Implemented |
+| Release ID template/timezone | releaseIdTemplate/releaseIdTimezone | Implemented |
+| Output JSON | output + Bytebase results action | Implemented; retains partially created resources |
+| VCS release source | vcsType + vcsUrl | Explicit commit URL from the Jenkins checkout |
+| VCS PR creator lookup | No automatic lookup | Requires a separate SCM integration |
+| GitHub comments/annotations/step summary | Build action + JSON | Does not post comments automatically |
+| GitLab Code Quality JSON | checkResults JSON | No separate Code Quality format |
+| Azure logging / Bitbucket reports | Build log + JSON | Does not call those platform APIs |
+| CLI/server version window | Bytebase API baseline 3.22.1 | CLI version rules are not applied to plugin versions |
+| Cancel on context termination | Cancel task runs on abort/timeout | Best effort; includes pagination |
+| Transient retries | Retry reads/check; refresh auth for mutations | Does not replay mutations after ambiguous failures |
 
-## Khác biệt có chủ đích
+## Intentional differences
 
-- Không có default project/target sample: tránh chạy nhầm database khi thiếu cấu hình.
-- Không có file version hợp lệ: fail thay vì gửi release rỗng.
-- Target stage không tồn tại: fail thay vì báo thành công mà chưa chạy stage yêu cầu.
-- Plan phải thuộc project, database group phải thuộc project; không trộn group với database.
-- Validate timeout, URL, workspace path trước khi dùng. Không có tùy chọn tắt TLS.
-- Overall rollout wait timeout được thêm vào; synchronous step không resume qua restart.
-- Bytebase approvals/policies vẫn được server thực thi. Jenkins input là một cổng bổ sung,
-  không tự tạo hoặc tự approve Bytebase Issue.
+- Project and target have no sample defaults, preventing an omitted setting from selecting a database.
+- No valid versioned files causes failure rather than an empty release.
+- A missing target environment fails instead of reporting success without running it.
+- Plans and database groups must belong to the project; groups cannot be mixed with individual databases.
+- Timeout, URL, and workspace paths are validated. There is no TLS-verification bypass.
+- An overall rollout wait timeout is provided. The synchronous step cannot resume across controller restarts.
+- Bytebase enforces its approvals and policies. Jenkins input is an additional gate; the plugin does not create or approve a Bytebase issue.
 
-## Kiến trúc
+## Architecture
 
-`BytebaseGlobalConfiguration` và `BytebaseServer` quản lý server/credential IDs như
-Tower installations. `BytebaseBuilder` là Jenkins SimpleBuildStep với symbol
-`bytebase`, dùng chung Pipeline/Freestyle/Snippet Generator. `WorkspaceFiles` đọc SQL
-qua remoting, `BytebaseClient` gọi RPC trên controller và resolve credentials trong
-scope build, `BytebaseRunner` điều phối check/rollout/cancel. `BytebaseResultAction`
-lưu report trong build, còn output JSON nằm trên workspace để archive.
+`BytebaseGlobalConfiguration` and `BytebaseServer` manage named connections and
+credential IDs. `BytebaseBuilder` is a SimpleBuildStep with the `bytebase` symbol,
+shared by Pipeline, Freestyle, and Snippet Generator. `WorkspaceFiles` reads SQL
+through remoting; `BytebaseClient` calls RPCs on the controller and resolves
+credentials in the build's scope. `BytebaseRunner` coordinates check, rollout,
+and cancellation. `BytebaseResultAction` retains build reports, while workspace
+JSON can be archived.
 
-Không copy TowerConnector vì protocol/auth/domain khác. Không copy toàn bộ CLI Go
-hoặc kéo dependency Bytebase backend vào JVM. Không dùng shell để ghép tham số/secret.
+TowerConnector was not copied because its protocol, authentication, and domain
+are different. The plugin does not embed the Go CLI or Bytebase backend, or use
+shell commands to assemble API arguments and secrets.

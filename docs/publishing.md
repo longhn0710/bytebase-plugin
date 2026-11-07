@@ -1,36 +1,42 @@
-# Đăng ký Jenkins hosting và phát hành Bytebase
+# Jenkins hosting and Bytebase releases
 
-Đối chiếu ngày 2026-11-07 với [hosting guide](https://www.jenkins.io/doc/developer/publishing/requesting-hosting/)
-và [form chính thức](https://github.com/jenkins-infra/repository-permissions-updater/blob/master/.github/ISSUE_TEMPLATE/1-hosting-request.yml).
+This guide was checked on 2026-11-07 against the
+[hosting guide](https://www.jenkins.io/doc/developer/publishing/requesting-hosting/)
+and [official request form](https://github.com/jenkins-infra/repository-permissions-updater/blob/master/.github/ISSUE_TEMPLATE/1-hosting-request.yml).
 
-## Danh tính và repository
+The submitted request is [Hosting Request #5434](https://github.com/jenkins-infra/repository-permissions-updater/issues/5434).
+Use that issue for current review status; submission and automated checks do not
+constitute hosting approval or a plugin release.
 
-| Mục | Giá trị |
+## Identity and repositories
+
+| Item | Value |
 | --- | --- |
 | Plugin ID / artifactId | `bytebase` |
 | Maven groupId | `io.jenkins.plugins` |
-| Repository hiện tại | `https://github.com/longhn0710/bytebase-plugin` |
-| Repository đăng ký | `jenkinsci/bytebase-plugin` |
+| Current repository | `https://github.com/longhn0710/bytebase-plugin` |
+| Requested repository | `jenkinsci/bytebase-plugin` |
 | GitHub maintainer | `@longhn0710` |
-| Jenkins community username | `longhn0710` (người dùng đã xác nhận) |
-| Release | JEP-229 qua GitHub Actions, bấm chạy thủ công |
+| Confirmed Jenkins community username | `longhn0710` |
+| Release method | JEP-229 through manually triggered GitHub Actions |
 
-POM/SCM và CODEOWNERS khai báo đích `jenkinsci` để đáp ứng hosting checks; đó chưa
-phải xác nhận repo đã được fork hoặc team đã tồn tại. Git remote cá nhân giữ nguyên
-cho tới khi hosting hoàn tất.
+POM/SCM and CODEOWNERS declare the requested jenkinsci target to satisfy hosting
+checks. This does not assert that the fork or developer team exists. Keep the
+personal Git remote until hosting is confirmed.
 
-## Trình tự cần thực hiện
+## Hosting and release procedure
 
-1. Đăng nhập [Jira Jenkins](https://issues.jenkins.io) bằng community account
-   `longhn0710` ít nhất một lần. Việc tạo account chưa chứng minh Jira đã nhận user;
-   dữ liệu kiểm tra có thể cập nhật theo giờ. Với JEP-229, maintainer không cần đặt
-   credential release cá nhân vào workflow.
-2. Review và commit/push source plugin lên repository công khai. Hiện remote ban
-   đầu chỉ có LICENSE/README nên không thể gửi hosting request như đã sẵn sàng.
-   Không đưa `target`, `work`, credentials hoặc gói lab evidence vào commit.
-3. Chờ GitHub build matrix và Jenkins Security Scan chạy; xử lý các findings.
-4. Chạy hosting checker chính thức trên source đã push, với token GitHub dùng để
-   đọc API (không cần scope đặc biệt cho public repo):
+1. Sign in to [Jenkins Jira](https://issues.jenkins.io) at least once with community
+   account longhn0710. Account creation alone does not prove Jira has received the
+   user; the checker's account data may refresh hourly. JEP-229 does not require
+   personal release credentials in the workflow.
+2. Review, commit, and push the plugin source to the public repository. Exclude
+   target/, work/, credentials, and private lab delivery bundles. The repository
+   initially contained only LICENSE/README; source was published through
+   [PR #1](https://github.com/longhn0710/bytebase-plugin/pull/1).
+3. Let the GitHub build matrix and Jenkins Security Scan complete and address findings.
+4. Run the official hosting checker against the pushed source with a GitHub API
+   token. No special token scope is required to read a public repository:
 
    ```sh
    git clone https://github.com/jenkins-infra/repository-permissions-updater.git
@@ -42,34 +48,38 @@ cho tới khi hosting hoàn tất.
      --jenkins-user longhn0710
    ```
 
-   Tool hiện yêu cầu Java25+ và Maven. Dùng GitHub CLI đã login hoặc cấu hình token
-   theo [hướng dẫn chính thức](https://github.com/jenkins-infra/repository-permissions-updater#running-the-hosting-checks-locally);
-   không ghi token vào source hay hồ sơ đăng ký. Exit0 mới là toàn bộ checks hoàn tất
-   và không có Required; exit1 có Required, exit2 thiếu auth, exit3 có check chưa chạy
-   xong. Kiểm tra file local không thay được kiểm tra remote/account/history này.
-5. Mở [Hosting request](https://github.com/jenkins-infra/repository-permissions-updater/issues/new?template=1-hosting-request.yml)
-   bằng nội dung bên dưới, chỉ tick Hosting checks khi bước4 thực sự đạt.
-6. Trả lời Hosting Team, sửa các yêu cầu review/security. Có thể comment
-   `/hosting re-check` để chạy lại bot. Không tự xác nhận đã được security audit.
-7. Khi được duyệt, nhận lời mời `jenkinsci`, xác minh source đã được fork đúng và
-   release permissions PR đã merge. Nếu không có PR tự động, tạo yêu cầu theo
-   [repository-permissions-updater](https://github.com/jenkins-infra/repository-permissions-updater).
-   Quyền GitHub và quyền phát hành Maven là hai quyền riêng.
-8. Đổi remotes theo repo mới sau khi xác minh. Nếu Hosting Team yêu cầu xử lý
-   fork network bằng cách xóa/refork repo cá nhân, thực hiện riêng sau khi đã có
-   bản canonical và backup; không tự động xóa repo trong script.
-9. Xác minh `ci.jenkins.io` nhận repo và buildPlugin pass. PR chứa CD setup phải
-   được Hosting Team review trước khi merge/bật release, theo
-   [CD guide](https://www.jenkins.io/doc/developer/publishing/releasing-cd/).
-10. Chạy workflow **Release plugin** với `validate_only=true` trước. Sau khi kết
-    quả và release notes đúng, chạy lại với `validate_only=false` để phát hành.
-    Secrets release do hạ tầng Jenkins quản lý sau khi CD được cấp phép. Không dùng
-    `jenkins.cred` của Jenkins lab cho Maven/GitHub release.
-11. Kiểm tra version trên Artifactory, GitHub release và
-    `https://plugins.jenkins.io/bytebase/`. Hosting approval chưa đồng nghĩa plugin
-    đã xuất hiện trên Update Center; cần release hợp lệ và metadata được cập nhật.
+   The checker currently requires Java 25+ and Maven. Use an authenticated GitHub
+   CLI or configure the token as described in the
+   [official instructions](https://github.com/jenkins-infra/repository-permissions-updater#running-the-hosting-checks-locally).
+   Never put it in source or a hosting request. Exit 0 means checks completed with
+   no Required findings; exit 1 means Required findings, exit 2 means authentication
+   is missing, and exit 3 means checks did not all complete. A source-only local
+   audit does not replace remote, account, and history verification.
+5. Open the [Hosting request form](https://github.com/jenkins-infra/repository-permissions-updater/issues/new?template=1-hosting-request.yml)
+   with the values below. Check the hosting-checks confirmation only after step 4 passes.
+6. Respond to the Hosting Team and address review/security requests. The documented
+   `/hosting re-check` comment reruns the bot. Do not claim human security approval
+   based only on a local or automated scan.
+7. After approval, accept the jenkinsci invitation, verify the fork, and confirm
+   that the release-permissions PR has merged. If no PR is generated, follow the
+   [permissions repository instructions](https://github.com/jenkins-infra/repository-permissions-updater).
+   GitHub access and Maven release permissions are separate.
+8. Update remotes only after verifying the new repository. If the Hosting Team
+   requests deleting/reforking the personal repository to fix the fork network,
+   handle that separately after confirming the canonical copy and a backup.
+   Do not automate repository deletion.
+9. Verify that ci.jenkins.io discovers the repository and buildPlugin passes. The
+   Hosting Team must review CD setup before it is merged/enabled for release,
+   following the [CD guide](https://www.jenkins.io/doc/developer/publishing/releasing-cd/).
+10. Run **Release plugin** with validate_only=true first. After validation and release
+    notes are correct, run with validate_only=false to publish. Jenkins infrastructure
+    manages release secrets after CD permission is granted. Lab Jenkins API credentials
+    are unrelated to Maven/GitHub release authentication.
+11. Verify the version in Artifactory, the GitHub release, and
+    `https://plugins.jenkins.io/bytebase/`. Hosting approval alone does not put a
+    plugin in the Update Center; a valid release and metadata refresh are required.
 
-## Nội dung Hosting request
+## Hosting request fields
 
 Title: **Hosting request for Bytebase**
 
@@ -90,21 +100,21 @@ requiring bytebase-action, Go, or a container runtime on build agents.
 Named Jenkins connections select service account credentials stored in Jenkins.
 The plugin supports SQL quality gates, creating releases/plans/rollouts, executing
 an existing plan through a selected environment, bounded polling and cancellation,
-and persisted build reports. Bytebase retains responsibility for project access,
-approval policies, and SQL execution. Optional read-only Oracle inspection validates
-target metadata and rollout task state.
+and persisted build reports. Bytebase enforces project access, approval policies,
+and SQL execution. Optional read-only Oracle inspection validates target metadata
+and rollout task state.
 
 Compared with wrapping bytebase-action in shell steps or composing generic HTTP
 requests, the plugin supplies Jenkins credential integration, workspace/agent file
 access, Bytebase resource lifecycle handling, cancellation, and Pipeline/Freestyle
-configuration as one implementation. It is an integration with the Bytebase control
-plane rather than a separate SQL migration engine.
+configuration as one implementation. It integrates with the Bytebase control plane
+rather than providing a separate SQL migration engine.
 
-Please use GitHub Issues as the non-security issue tracker. The source is MIT
-licensed. Linux Java21/25 buildPlugin CI and Jenkins Security Scan are configured.
-JEP-229 is prepared with manual GitHub Actions releases only. Please review the CD
-setup before it is enabled. Public CI and hosting/security checks must be evaluated
-against the submitted commit; private lab results are supplementary.
+Use GitHub Issues for non-security reports. The source is MIT licensed. Linux
+Java 21/25 buildPlugin CI and Jenkins Security Scan are configured. JEP-229 is prepared
+for manual GitHub Actions releases. The Hosting Team must review that setup before
+release permissions are enabled. Public CI and hosting/security checks must be
+assessed against the submitted commit; private lab results are supplementary.
 
 ### GitHub and Jenkins project users
 
@@ -118,33 +128,42 @@ Yes
 
 - [ ] I have run the hosting checks locally against this repository and fixed all issues marked Required.
 
-Leave this unchecked in this draft until the complete official checker succeeds.
+This reusable example stays unchecked. The actual submission may check it only
+when the full official checker has succeeded for the submitted source.
 
-## Bản chuẩn bị local
+## Build and versioning configuration
 
-Build metadata đang dùng parent POM6.2250, baseline2.555.3, BOM2.555.x và Java21/25
-để đáp ứng [Requirements.java của checker](https://github.com/jenkins-infra/repository-permissions-updater/blob/master/src/main/java/io/jenkins/infra/repository_permissions_updater/hosting/Requirements.java).
-`999999-SNAPSHOT` là version local chuẩn cho CD; bản phát hành sẽ có dạng
-`N.v<commit>`, không phải version PoC0.2.x. Không tự release bằng `mvn deploy`.
+The hosting preparation uses parent POM 6.2250, baseline 2.555.3, BOM 2.555.x, and
+Java 21/25 to meet the checked
+[hosting requirements](https://github.com/jenkins-infra/repository-permissions-updater/blob/master/src/main/java/io/jenkins/infra/repository_permissions_updater/hosting/Requirements.java).
+`999999-SNAPSHOT` is the local CD development version; published versions use
+`N.v<commit>`, rather than the lab's 0.2.x PoC versions. Do not release with an
+ad hoc `mvn deploy` command.
 
-Thiết lập network giữ ở JVM/controller theo quyết định của maintainer. Khuyến nghị
-của checker về tích hợp thiết lập mạng Jenkins được ghi nhận riêng; không thêm lại
-trường cấu hình đã được yêu cầu xóa.
+Network configuration remains a JVM/controller concern. The checker's recommendation
+about integrating Jenkins network settings is documented for review; removed
+per-plugin settings have not been reintroduced.
 
-## Kết quả chuẩn bị
+## Recorded verification stages
 
-Checker chính thức tại commit `6b351f66e3cfd605dd8b3c67c7e0453f6d50cd60` đã được build
-bằng Java25 và chạy read-only trên repo GitHub. Kết quả remote: exit1, 8 Required
-thiếu file vì default branch chưa có source/config. Các bước kiểm tra GitHub user và
-Jenkins project user đã hoàn tất, không báo user thiếu đăng nhập Jira.
+The official checker at commit `6b351f66e3cfd605dd8b3c67c7e0453f6d50cd60` was built
+with Java 25. Before source publication, it returned exit 1 with eight missing-file
+requirements against the old default branch. GitHub and Jenkins account verification
+completed without a missing-Jira-user finding.
 
-Source local được đưa vào snapshot tạm và chạy trực tiếp bốn verifier chính thức:
-RequiredFiles, Maven, Jelly, SourceCode. Kết quả: **0 Required**, 2 Warning. Đây
-không phải kết quả full remote checker trên source mới; GitHub/default branch,
-history và security review cần kiểm tra lại sau push. Checkbox trong hosting form
-vẫn chưa được tick.
+A temporary local snapshot then ran the official RequiredFiles, Maven, Jelly, and
+SourceCode verifiers: 0 Required, 2 Warning. That source-only audit did not cover
+remote accounts/history or constitute hosting approval.
 
-Hai Warning đang giữ để review: credential override ở advanced dùng ID nhập tay;
-HTTP client dùng thiết lập JVM thay vì hook cấu hình mạng của Jenkins. Không có
-bypass hoặc tắt bộ kiểm tra. Những kết quả này mô tả snapshot trước lần push đầu tiên; trạng thái PR, CI/security
-scan và hosting phải kiểm tra trên GitHub. Không coi kiểm tra local là hosting approval.
+After PR #1 merged, the full remote checker returned **exit 0 with 0 Required**
+against master commit `506fc68d4c5721eed7e8a9eaf968b6558a5f2b76`. The
+[master Java 21/25 build](https://github.com/longhn0710/bytebase-plugin/actions/runs/42363494005)
+and [master security scan](https://github.com/longhn0710/bytebase-plugin/actions/runs/42363494240)
+passed; processed SARIF contained 0 findings. The hosting infrastructure's
+[security scan](https://github.com/jenkins-infra/repository-permissions-updater/actions/runs/42363866951)
+also passed and assigned security-audit-done to the submitted request.
+
+Two recommendations remain recorded for Hosting Team review: the advanced credential
+override accepts a manually entered ID, and the HTTP client follows JVM settings
+rather than the Jenkins network-settings hook. Checks were not bypassed or disabled.
+The hosting issue remains the authority for later review, fork, and permission decisions.
