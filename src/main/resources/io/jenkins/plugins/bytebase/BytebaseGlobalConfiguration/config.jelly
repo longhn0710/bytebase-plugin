@@ -1,0 +1,10 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <f:section title="Bytebase">
+    <f:entry title="Connections" field="servers">
+      <f:repeatableProperty field="servers">
+        <f:repeatableDeleteButton/>
+      </f:repeatableProperty>
+    </f:entry>
+  </f:section>
+</j:jelly>

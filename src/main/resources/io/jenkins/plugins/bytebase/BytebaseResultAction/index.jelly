@@ -1,0 +1,8 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Bytebase results"><l:main-panel>
+    <h1>Bytebase results</h1>
+    <p>SQL check results and resources created by this build. Rollout execution remains subject to Bytebase policies.</p>
+    <pre>${it.report}</pre>
+  </l:main-panel></l:layout>
+</j:jelly>
