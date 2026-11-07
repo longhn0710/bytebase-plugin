@@ -146,5 +146,5 @@ vẫn chưa được tick.
 
 Hai Warning đang giữ để review: credential override ở advanced dùng ID nhập tay;
 HTTP client dùng thiết lập JVM thay vì hook cấu hình mạng của Jenkins. Không có
-bypass hoặc tắt bộ kiểm tra. GitHub Actions/Security Scan và ci.jenkins.io trên source
-mới chưa chạy. Chưa gửi hosting issue, push, merge hoặc release.
+bypass hoặc tắt bộ kiểm tra. Những kết quả này mô tả snapshot trước lần push đầu tiên; trạng thái PR, CI/security
+scan và hosting phải kiểm tra trên GitHub. Không coi kiểm tra local là hosting approval.
