@@ -74,18 +74,18 @@ Pipeline Syntax / Snippet Generator exposes the same options.
 | --- | --- |
 | `serverName`, `command`, `project` | Required; command is `check`, `rollout`, or `inspect` |
 | `targets` | Comma/whitespace/newline-separated; required except rollout with an existing plan |
-| `filePattern` | Workspace-relative Ant glob, including `**/*.sql` |
+| `filePattern` | Workspace-relative Ant glob required for check and rollout from SQL files |
 | `credentialsId` | Advanced override; empty uses the connection credential |
 | `expectedUrl` | Optional connection guard checked before any RPC |
-| `inspectionMode` | `preflight`, `ready`, or `done`; inspect only |
+| `inspectionMode` | For inspect, choose `preflight` (default), `ready`, or `done` |
 | `expectedHost`, `expectedPort`, `expectedService` | Required for Oracle preflight |
 | `declarative` | `false`; experimental Bytebase feature |
 | `checkRelease` | `SKIP` by default; also `FAIL_ON_WARNING` and `FAIL_ON_ERROR` |
 | `customRules` | Empty; natural-language AI rules for check |
 | `plan` | Empty; `projects/{project}/plans/{plan}` |
-| `targetStage` | Empty; `environments/{environment}` |
+| `targetStage` | An `environments/{environment}` resource. Required for inspect and optional for rollout. |
 | `releaseIdTemplate` | `release_{date}-RC{iteration}`; interpreted by Bytebase |
-| `releaseIdTimezone` | `UTC`; IANA timezone |
+| `releaseIdTimezone` | Defaults to `UTC`. The dropdown lists timezone IDs from the Jenkins JVM. |
 | `output` | `bytebase-result.json`; empty disables workspace output |
 | `httpTimeoutSeconds` | `120`; 1–600 seconds per RPC |
 | `waitTimeoutSeconds` | `3600`; overall wait, checked between RPCs/polls |
@@ -104,7 +104,8 @@ files; declarative rollout joins them with newlines and uses UTC version
 
 ## Reports, limits, and recovery
 
-**Bytebase results** retains every operation's report, including gate failures.
+**Bytebase results** shows each operation's JSON report as plain text, including
+gate failures.
 Workspace JSON contains `checkResults` or release/plan/rollout resource names. If
 resource creation fails partway through, names already obtained remain available.
 Archive the JSON before removing the agent workspace.

@@ -9,13 +9,14 @@ public final class BytebaseResultAction implements Action {
         reports.add(command + "\n" + report);
     }
 
+    /** Returns a plain-text report containing command names and JSON results. */
     public synchronized String getReport() {
         return String.join("\n\n", reports);
     }
 
     @Override
     public String getIconFileName() {
-        return "symbol-database";
+        return "symbol-server-outline plugin-ionicons-api";
     }
 
     @Override

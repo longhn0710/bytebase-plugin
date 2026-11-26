@@ -19,6 +19,7 @@ import hudson.model.Item;
 import hudson.model.Result;
 import hudson.model.User;
 import hudson.security.ACL;
+import hudson.util.FormValidation;
 import hudson.util.Secret;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -35,6 +36,10 @@ import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
+import org.htmlunit.html.HtmlElement;
+import org.htmlunit.html.HtmlInput;
+import org.htmlunit.html.HtmlSelect;
+import org.htmlunit.html.HtmlTextArea;
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
@@ -65,7 +70,7 @@ class BytebasePluginTest {
                                     "target",
                                     TARGET,
                                     "advices",
-                                    List.of(object("status", "ERROR", "title", "Example policy")))))
+                                    List.of(object("status", "ERROR", "title", "<b>Example policy</b>")))))
                     : api.normal(method, body);
             j.createOnlineSlave();
             WorkflowJob job = j.createProject(WorkflowJob.class);
@@ -83,6 +88,17 @@ class BytebasePluginTest {
             assertEquals(1, build.getArtifacts().size());
             assertNotNull(build.getAction(BytebaseResultAction.class));
             assertTrue(build.getAction(BytebaseResultAction.class).getReport().contains("Example policy"));
+            try (var web = j.createWebClient()) {
+                var page = web.getPage(build, "bytebase/");
+                assertTrue(
+                        page.asNormalizedText()
+                                .contains(
+                                        "Each report starts with the Bytebase command, followed by its JSON output as plain text."));
+                HtmlElement report = page.getFirstByXPath("//pre");
+                assertTrue(report.getTextContent().startsWith("check\n"));
+                assertTrue(report.getTextContent().contains("<b>Example policy"));
+                assertNull(report.getFirstByXPath(".//b"));
+            }
             JSONObject request = api.bodies("CheckRelease").get(0);
             JSONObject file =
                     request.getJSONObject("release").getJSONArray("files").getJSONObject(0);
@@ -94,17 +110,63 @@ class BytebasePluginTest {
     }
 
     @Test
+    void snippetGeneratorUsesAdvancedDefaultsWithoutOpeningSection(JenkinsRule j) throws Exception {
+        try (Api api = new Api();
+                var web = j.createWebClient()) {
+            configure(j, api);
+            WorkflowJob job = j.createProject(WorkflowJob.class);
+            var page = web.getPage(job, "pipeline-syntax/");
+            HtmlSelect steps = page.getFirstByXPath("//select[contains(@class, 'dropdownList')]");
+            steps.setSelectedAttribute(
+                    steps.getOptions().stream()
+                            .filter(option -> option.getText().startsWith("bytebase:"))
+                            .findFirst()
+                            .orElseThrow(),
+                    true);
+            web.waitForBackgroundJavaScript(5000);
+
+            HtmlInput timeout = page.getFirstByXPath("//input[@name='_.httpTimeoutSeconds']");
+            HtmlInput wait = page.getFirstByXPath("//input[@name='_.waitTimeoutSeconds']");
+            HtmlInput poll = page.getFirstByXPath("//input[@name='_.pollIntervalSeconds']");
+            HtmlSelect timezone = page.getFirstByXPath("//select[@name='_.releaseIdTimezone']");
+            assertEquals("120", timeout.getValue());
+            assertEquals("3600", wait.getValue());
+            assertEquals("5", poll.getValue());
+            assertEquals("UTC", timezone.getSelectedOptions().getFirst().getValueAttribute());
+            page.<HtmlInput>getFirstByXPath("//input[@name='_.project']").setValue(PROJECT);
+            page.<HtmlInput>getFirstByXPath("//input[@name='_.filePattern']").setValue("migrations/**/*.sql");
+            page.<HtmlTextArea>getFirstByXPath("//textarea[@name='_.targets']").setText(TARGET);
+            page.getHtmlElementById("generatePipelineScript").click();
+            web.waitForBackgroundJavaScript(5000);
+            String snippet =
+                    page.<HtmlTextArea>getHtmlElementById("prototypeText").getText();
+            assertTrue(snippet.startsWith("bytebase "), snippet);
+            assertFalse(snippet.contains("TimeoutSeconds: 0"), snippet);
+            assertFalse(snippet.contains("pollIntervalSeconds: 0"), snippet);
+            job.setDefinition(new CpsFlowDefinition("""
+                    node {
+                      writeFile file: 'migrations/V1__example.sql', text: 'SELECT 1;'
+                    """ + snippet + "\n}", true));
+            j.buildAndAssertSuccess(job);
+            assertEquals(1, api.bodies("CheckRelease").size());
+        }
+    }
+
+    @Test
     void freestyleAndConfigurationRoundtrip(JenkinsRule j) throws Exception {
         try (Api api = new Api()) {
             configure(j, api);
             FreeStyleProject job = j.createFreeStyleProject();
             BytebaseBuilder options = options("check");
             options.setCustomRules("All tables need a primary key");
+            options.setReleaseIdTimezone("+07:00");
             job.getBuildersList().add(options);
             job = j.configRoundtrip(job);
             assertEquals(
                     "All tables need a primary key",
                     job.getBuildersList().get(BytebaseBuilder.class).getCustomRules());
+            assertEquals(
+                    "+07:00", job.getBuildersList().get(BytebaseBuilder.class).getReleaseIdTimezone());
             sql(j.jenkins.getWorkspaceFor(job));
             FreeStyleBuild build = j.buildAndAssertSuccess(job);
             assertTrue(j.jenkins
@@ -134,6 +196,60 @@ class BytebasePluginTest {
             assertEquals(
                     "account",
                     BytebaseGlobalConfiguration.get().getServers().get(0).getCredentialsId());
+        }
+    }
+
+    @Test
+    void formValidationFollowsCommandRequirements(JenkinsRule j) {
+        var descriptor = j.jenkins.getDescriptorByType(BytebaseBuilder.DescriptorImpl.class);
+        assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckProject("example").kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckProject(PROJECT).kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargets(TARGET, "inspect", PROJECT, "").kind);
+        assertEquals(
+                FormValidation.Kind.ERROR,
+                descriptor.doCheckTargets(TARGET + ",instances/other/databases/other", "inspect", PROJECT, "").kind);
+        String group = PROJECT + "/databaseGroups/all";
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargets(group, "check", PROJECT, "").kind);
+        assertEquals(
+                FormValidation.Kind.ERROR, descriptor.doCheckTargets(group + "," + TARGET, "check", PROJECT, "").kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargets("", "rollout", PROJECT, PLAN).kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargetStage("", "rollout").kind);
+        assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckTargetStage("", "inspect").kind);
+        assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckTargetStage("test", "rollout").kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargetStage("environments/test", "inspect").kind);
+        assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckFilePattern("", "check", "").kind);
+        assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckFilePattern("../example.sql", "rollout", "").kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("migrations/**/*.sql", "check", "").kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("", "inspect", "").kind);
+        assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("", "rollout", PLAN).kind);
+    }
+
+    @Test
+    void formEndpointsRequireOverallRead(JenkinsRule j) {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        j.jenkins.setAuthorizationStrategy(
+                new MockAuthorizationStrategy().grant(Jenkins.READ).everywhere().to("reader"));
+        var descriptor = j.jenkins.getDescriptorByType(BytebaseBuilder.DescriptorImpl.class);
+        try (var ignored = ACL.as2(User.getById("restricted", true).impersonate2())) {
+            assertTrue(descriptor.doFillInspectionModeItems().isEmpty());
+            assertTrue(descriptor.doFillReleaseIdTimezoneItems("+07:00").isEmpty());
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckProject("invalid").kind);
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargets("", "check", PROJECT, "").kind);
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargetStage("", "inspect").kind);
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("", "check", "").kind);
+        }
+        try (var ignored = ACL.as2(User.getById("reader", true).impersonate2())) {
+            assertEquals(
+                    List.of("preflight", "ready", "done"),
+                    descriptor.doFillInspectionModeItems().stream()
+                            .map(option -> option.value)
+                            .toList());
+            assertTrue(descriptor.doFillReleaseIdTimezoneItems("+07:00").stream()
+                    .anyMatch(option -> option.value.equals("+07:00")));
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckProject("invalid").kind);
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckTargets("", "check", PROJECT, "").kind);
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckTargetStage("", "inspect").kind);
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckFilePattern("", "check", "").kind);
         }
     }
 
