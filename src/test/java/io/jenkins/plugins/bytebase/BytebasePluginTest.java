@@ -194,8 +194,8 @@ class BytebasePluginTest {
     }
 
     @Test
-    void formValidationFollowsCommandRequirements() {
-        var descriptor = new BytebaseBuilder.DescriptorImpl();
+    void formValidationFollowsCommandRequirements(JenkinsRule j) {
+        var descriptor = j.jenkins.getDescriptorByType(BytebaseBuilder.DescriptorImpl.class);
         assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckProject("example").kind);
         assertEquals(FormValidation.Kind.OK, descriptor.doCheckProject(PROJECT).kind);
         assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargets(TARGET, "inspect", PROJECT, "").kind);
@@ -216,6 +216,35 @@ class BytebasePluginTest {
         assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("migrations/**/*.sql", "check", "").kind);
         assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("", "inspect", "").kind);
         assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("", "rollout", PLAN).kind);
+    }
+
+    @Test
+    void formEndpointsRequireOverallRead(JenkinsRule j) {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        j.jenkins.setAuthorizationStrategy(
+                new MockAuthorizationStrategy().grant(Jenkins.READ).everywhere().to("reader"));
+        var descriptor = j.jenkins.getDescriptorByType(BytebaseBuilder.DescriptorImpl.class);
+        try (var ignored = ACL.as2(User.getById("restricted", true).impersonate2())) {
+            assertTrue(descriptor.doFillInspectionModeItems().isEmpty());
+            assertTrue(descriptor.doFillReleaseIdTimezoneItems("+07:00").isEmpty());
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckProject("invalid").kind);
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargets("", "check", PROJECT, "").kind);
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckTargetStage("", "inspect").kind);
+            assertEquals(FormValidation.Kind.OK, descriptor.doCheckFilePattern("", "check", "").kind);
+        }
+        try (var ignored = ACL.as2(User.getById("reader", true).impersonate2())) {
+            assertEquals(
+                    List.of("preflight", "ready", "done"),
+                    descriptor.doFillInspectionModeItems().stream()
+                            .map(option -> option.value)
+                            .toList());
+            assertTrue(descriptor.doFillReleaseIdTimezoneItems("+07:00").stream()
+                    .anyMatch(option -> option.value.equals("+07:00")));
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckProject("invalid").kind);
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckTargets("", "check", PROJECT, "").kind);
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckTargetStage("", "inspect").kind);
+            assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckFilePattern("", "check", "").kind);
+        }
     }
 
     @Test

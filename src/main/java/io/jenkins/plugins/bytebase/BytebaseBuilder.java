@@ -452,6 +452,9 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
         @POST
         public ListBoxModel doFillInspectionModeItems() {
             ListBoxModel items = new ListBoxModel();
+            if (!Jenkins.get().hasPermission(Jenkins.READ)) {
+                return items;
+            }
             INSPECTION_MODES.forEach(items::add);
             return items;
         }
@@ -459,6 +462,9 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
         @POST
         public ListBoxModel doFillReleaseIdTimezoneItems(@QueryParameter String releaseIdTimezone) {
             ListBoxModel items = new ListBoxModel();
+            if (!Jenkins.get().hasPermission(Jenkins.READ)) {
+                return items;
+            }
             items.add("UTC");
             ZoneId.getAvailableZoneIds().stream()
                     .filter(zone -> !zone.equals("UTC"))
@@ -479,6 +485,9 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
 
         @POST
         public FormValidation doCheckProject(@QueryParameter String value) {
+            if (!Jenkins.get().hasPermission(Jenkins.READ)) {
+                return FormValidation.ok();
+            }
             return fieldValidation(projectError(value));
         }
 
@@ -488,17 +497,26 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
                 @QueryParameter String command,
                 @QueryParameter String project,
                 @QueryParameter String plan) {
+            if (!Jenkins.get().hasPermission(Jenkins.READ)) {
+                return FormValidation.ok();
+            }
             return fieldValidation(targetsError(command, project, plan, value));
         }
 
         @POST
         public FormValidation doCheckTargetStage(@QueryParameter String value, @QueryParameter String command) {
+            if (!Jenkins.get().hasPermission(Jenkins.READ)) {
+                return FormValidation.ok();
+            }
             return fieldValidation(targetStageError(command, value));
         }
 
         @POST
         public FormValidation doCheckFilePattern(
                 @QueryParameter String value, @QueryParameter String command, @QueryParameter String plan) {
+            if (!Jenkins.get().hasPermission(Jenkins.READ)) {
+                return FormValidation.ok();
+            }
             if (usesSqlFiles(command, plan)) {
                 if (text(value).isBlank()) {
                     return FormValidation.error("SQL file pattern is required");
