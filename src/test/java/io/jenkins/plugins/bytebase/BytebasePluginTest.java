@@ -89,7 +89,13 @@ class BytebasePluginTest {
             assertNotNull(build.getAction(BytebaseResultAction.class));
             assertTrue(build.getAction(BytebaseResultAction.class).getReport().contains("Example policy"));
             try (var web = j.createWebClient()) {
-                HtmlElement report = web.getPage(build, "bytebase/").getFirstByXPath("//pre");
+                var page = web.getPage(build, "bytebase/");
+                assertTrue(
+                        page.asNormalizedText()
+                                .contains(
+                                        "Each report starts with the Bytebase command, followed by its JSON output as plain text."));
+                HtmlElement report = page.getFirstByXPath("//pre");
+                assertTrue(report.getTextContent().startsWith("check\n"));
                 assertTrue(report.getTextContent().contains("<b>Example policy"));
                 assertNull(report.getFirstByXPath(".//b"));
             }
