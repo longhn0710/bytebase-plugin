@@ -19,12 +19,15 @@ import hudson.model.queue.Tasks;
 import hudson.security.ACL;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.Builder;
+import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
 import java.io.IOException;
+import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import jenkins.model.Jenkins;
 import jenkins.tasks.SimpleBuildStep;
 import org.jenkinsci.Symbol;
@@ -36,6 +39,10 @@ import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
 public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
+    private static final Pattern DATABASE_TARGET =
+            Pattern.compile("(?:projects/[^/\\s]+/)?instances/[^/\\s]+/databases/[^/\\s]+");
+    private static final List<String> INSPECTION_MODES = List.of("preflight", "ready", "done");
+
     private final String serverName;
     private final String command;
     private final String project;
@@ -284,16 +291,70 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
     }
 
     List<String> targetList() {
-        return Arrays.stream(targets.split("[,\\s]+")).filter(s -> !s.isBlank()).toList();
+        return parseTargets(targets);
+    }
+
+    private static List<String> parseTargets(String value) {
+        return Arrays.stream(text(value).split("[,\\s]+"))
+                .filter(s -> !s.isBlank())
+                .toList();
+    }
+
+    private static boolean usesSqlFiles(String command, String plan) {
+        return "check".equals(command)
+                || ("rollout".equals(command) && text(plan).isBlank());
+    }
+
+    private static String projectError(String project) {
+        return text(project).matches("projects/[^/\\s]+") ? null : "project must be projects/{project}";
+    }
+
+    private static String targetStageError(String command, String targetStage) {
+        String value = text(targetStage);
+        if (value.isEmpty() && !"inspect".equals(command)) {
+            return null;
+        }
+        return value.matches("environments/[^/\\s]+") ? null : "targetStage must be environments/{environment}";
+    }
+
+    private static String targetsError(String command, String project, String plan, String targets) {
+        if ("inspect".equals(command)) {
+            List<String> values = parseTargets(targets);
+            return values.size() == 1 && DATABASE_TARGET.matcher(values.get(0)).matches()
+                    ? null
+                    : "Inspection requires exactly one database target";
+        }
+        if (!usesSqlFiles(command, plan)) {
+            return null;
+        }
+        List<String> values = parseTargets(targets);
+        if (values.isEmpty()) {
+            return "At least one target is required";
+        }
+        Pattern group = Pattern.compile(Pattern.quote(text(project)) + "/databaseGroups/[^/\\s]+");
+        for (String target : values) {
+            if (group.matcher(target).matches()) {
+                if (values.size() != 1) {
+                    return "Use database targets or exactly one database group";
+                }
+            } else if (!DATABASE_TARGET.matcher(target).matches()) {
+                return "Invalid Bytebase target resource name";
+            }
+        }
+        return null;
+    }
+
+    private static void requireValid(String error) throws AbortException {
+        if (error != null) {
+            throw new AbortException(error);
+        }
     }
 
     void validate() throws AbortException {
         if (!Set.of("check", "rollout", "inspect").contains(text(command))) {
             throw new AbortException("command must be check, rollout or inspect");
         }
-        if (!text(project).matches("projects/[^/\\s]+")) {
-            throw new AbortException("project must be projects/{project}");
-        }
+        requireValid(projectError(project));
         if (!Set.of("SKIP", "FAIL_ON_WARNING", "FAIL_ON_ERROR").contains(checkRelease)) {
             throw new AbortException("Invalid checkRelease; use SKIP, FAIL_ON_WARNING or FAIL_ON_ERROR");
         }
@@ -305,45 +366,26 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
             throw new AbortException(
                     "HTTP timeout must be 1..600 seconds, poll interval 1..300 and wait timeout positive");
         }
-        if (!targetStage.isEmpty() && !targetStage.matches("environments/[^/\\s]+")) {
-            throw new AbortException("targetStage must be environments/{environment}");
+        requireValid(targetStageError(command, targetStage));
+        if (usesSqlFiles(command, plan)) {
+            WorkspaceFiles.validateRelative(filePattern);
         }
+        requireValid(targetsError(command, project, plan, targets));
         if (command.equals("inspect")) {
-            if (!Set.of("preflight", "ready", "done").contains(inspectionMode)
-                    || targetList().size() != 1
-                    || !targetList().get(0).matches("(?:projects/[^/\\s]+/)?instances/[^/\\s]+/databases/[^/\\s]+")
-                    || targetStage.isBlank()) {
-                throw new AbortException(
-                        "Inspection requires preflight/ready/done mode, one database target and targetStage");
+            if (!INSPECTION_MODES.contains(inspectionMode)) {
+                throw new AbortException("inspectionMode must be preflight, ready or done");
             }
             if (inspectionMode.equals("preflight")) {
                 if (expectedHost.isBlank() || expectedPort.isBlank() || expectedService.isBlank()) {
                     throw new AbortException(
                             "Oracle preflight requires expectedHost, expectedPort and expectedService");
                 }
-            } else if (!plan.matches(java.util.regex.Pattern.quote(project) + "/plans/[^/\\s]+")) {
+            } else if (!plan.matches(Pattern.quote(project) + "/plans/[^/\\s]+")) {
                 throw new AbortException("Inspection plan must belong to the specified project");
             }
         } else if (command.equals("rollout") && !plan.isBlank()) {
-            if (!plan.matches(java.util.regex.Pattern.quote(project) + "/plans/[^/\\s]+")) {
+            if (!plan.matches(Pattern.quote(project) + "/plans/[^/\\s]+")) {
                 throw new AbortException("plan must belong to the specified project");
-            }
-        } else {
-            WorkspaceFiles.validateRelative(filePattern);
-            List<String> values = targetList();
-            int groups = 0;
-            if (values.isEmpty()) {
-                throw new AbortException("At least one target is required");
-            }
-            for (String target : values) {
-                if (target.matches(java.util.regex.Pattern.quote(project) + "/databaseGroups/[^/\\s]+")) {
-                    groups++;
-                } else if (!target.matches("(?:projects/[^/\\s]+/)?instances/[^/\\s]+/databases/[^/\\s]+")) {
-                    throw new AbortException("Invalid Bytebase target resource name");
-                }
-            }
-            if (groups > 0 && values.size() != 1) {
-                throw new AbortException("Use database targets or exactly one database group");
             }
         }
         if (!output.isBlank()) {
@@ -351,7 +393,7 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
         }
         try {
             ZoneId.of(releaseIdTimezone);
-        } catch (java.time.DateTimeException e) {
+        } catch (DateTimeException e) {
             throw new AbortException("Invalid releaseIdTimezone");
         }
         if (!vcsType.isBlank() || !vcsUrl.isBlank()) {
@@ -405,6 +447,73 @@ public final class BytebaseBuilder extends Builder implements SimpleBuildStep {
             items.add("FAIL_ON_WARNING");
             items.add("FAIL_ON_ERROR");
             return items;
+        }
+
+        @POST
+        public ListBoxModel doFillInspectionModeItems() {
+            ListBoxModel items = new ListBoxModel();
+            INSPECTION_MODES.forEach(items::add);
+            return items;
+        }
+
+        @POST
+        public ListBoxModel doFillReleaseIdTimezoneItems(@QueryParameter String releaseIdTimezone) {
+            ListBoxModel items = new ListBoxModel();
+            items.add("UTC");
+            ZoneId.getAvailableZoneIds().stream()
+                    .filter(zone -> !zone.equals("UTC"))
+                    .sorted()
+                    .forEach(items::add);
+            // ZoneId.of also accepts offsets and prefixed offsets absent from the region list.
+            if (!text(releaseIdTimezone).isEmpty()
+                    && items.stream().noneMatch(option -> option.value.equals(releaseIdTimezone))) {
+                try {
+                    ZoneId.of(releaseIdTimezone);
+                    items.add(releaseIdTimezone);
+                } catch (DateTimeException ignored) {
+                    // Invalid IDs are rejected by runtime validation.
+                }
+            }
+            return items;
+        }
+
+        @POST
+        public FormValidation doCheckProject(@QueryParameter String value) {
+            return fieldValidation(projectError(value));
+        }
+
+        @POST
+        public FormValidation doCheckTargets(
+                @QueryParameter String value,
+                @QueryParameter String command,
+                @QueryParameter String project,
+                @QueryParameter String plan) {
+            return fieldValidation(targetsError(command, project, plan, value));
+        }
+
+        @POST
+        public FormValidation doCheckTargetStage(@QueryParameter String value, @QueryParameter String command) {
+            return fieldValidation(targetStageError(command, value));
+        }
+
+        @POST
+        public FormValidation doCheckFilePattern(
+                @QueryParameter String value, @QueryParameter String command, @QueryParameter String plan) {
+            if (usesSqlFiles(command, plan)) {
+                if (text(value).isBlank()) {
+                    return FormValidation.error("SQL file pattern is required");
+                }
+                try {
+                    WorkspaceFiles.validateRelative(value);
+                } catch (AbortException e) {
+                    return FormValidation.error(e.getMessage());
+                }
+            }
+            return FormValidation.ok();
+        }
+
+        private static FormValidation fieldValidation(String error) {
+            return error == null ? FormValidation.ok() : FormValidation.error(error);
         }
 
         @POST
